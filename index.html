@@ -166,6 +166,11 @@ textarea{resize:vertical;min-height:90px}
 .opt.price-opt small{color:var(--muted)}
 .opt.price-opt.disabled{opacity:.5;pointer-events:none}
 @media(max-width:600px){.trl-grid{grid-template-columns:repeat(2,1fr)}.bd-label{width:120px}}
+.result-actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+.result-actions .btn{flex:1;min-width:160px}
+.quick-replies{display:none;flex-wrap:wrap;gap:8px;padding:10px 0}
+.quick-reply-btn{background:var(--card);border:1px solid var(--primary);color:var(--primary);border-radius:20px;padding:8px 14px;font-size:.82rem;cursor:pointer;font-family:inherit}
+.quick-reply-btn:hover{background:var(--primary);color:#fff}
 </style>
 </head>
 <body>
@@ -293,7 +298,7 @@ textarea{resize:vertical;min-height:90px}
 
 <div class="field"><label>تعداد افراد درگیر در تحقیق و توسعه (R&D)</label><input id="rdStaff" type="number" placeholder="مثلاً: ۵"></div>
 
-<div class="field"><label>درصد طراحی و ساخت داخلی (بومی‌سازی)</label><input id="localizationPercent" type="number" min="0" max="100" placeholder="مثلاً: ۸۰"></div>
+<div class="field"><label>درصد طراحی و ساخت داخلی (بومی‌سازی) <span style="color:var(--muted);font-weight:400">(اختیاری)</span></label><input id="localizationPercent" type="number" min="0" max="100" placeholder="اگه تقریبی هم نمی‌دونید، خالی بذارید"></div>
 
 <div class="field"><label>پیچیدگی فنی نسبت به نمونه‌های مشابه داخلی/خارجی</label>
 <textarea id="techComparison" maxlength="600" placeholder="چه چیزی این محصول را از نظر فنی متمایز می‌کند؟"></textarea></div>
@@ -406,6 +411,8 @@ textarea{resize:vertical;min-height:90px}
 <div class="bubble bot">سلام! من مشاور هوشمند دانش‌بنیان هستم. چه سوالی در مورد ضوابط یا فرآیندها دارید؟</div>
 
 </div>
+
+<div id="quickReplies" class="quick-replies" style="display:none"></div>
 
 <div id="attachedFilesChips" class="attached-chips" style="display:none"></div>
 
@@ -748,9 +755,29 @@ function buildResultHTML(markdown, includeRestartButton){
   const { level, text } = extractReadinessLevel(markdown || '');
   const gaugeHtml = renderReadinessGauge(level);
   const restartBtn = includeRestartButton
-    ? '<button class="btn btn-ghost" onclick="location.reload()">شروع مجدد</button>'
+    ? `<div class="result-actions">
+         <button class="btn btn-primary" onclick="goToConsultant()">💬 گفتگو با مشاور هوشمند</button>
+         <button class="btn btn-ghost" onclick="location.reload()">شروع مجدد</button>
+       </div>`
     : '';
   return `<div class="result-md">${gaugeHtml}${DOMPurify.sanitize(marked.parse(text))}</div>${restartBtn}`;
+}
+
+function goToConsultant(){
+  const chatTabBtn = document.querySelector('.tab[data-tab="chat"]');
+  if(chatTabBtn) switchTab('chat', chatTabBtn);
+}
+
+function extractWeaknessItems(markdown){
+  if(!markdown) return [];
+  const match = markdown.match(/##\s*⚠️[^\n]*\n([\s\S]*?)(?=\n##|\n?$)/);
+  if(!match) return [];
+  const body = match[1];
+  return body.split('\n')
+    .map(l => l.trim())
+    .filter(l => /^[-*]\s+/.test(l) || /^\d+[.)]\s+/.test(l))
+    .map(l => l.replace(/^[-*]\s+/, '').replace(/^\d+[.)]\s+/, '').trim())
+    .filter(Boolean);
 }
 
 function fireConfetti(){
@@ -1011,12 +1038,44 @@ async function openChatTab(){
     if(box && !box.dataset.historyLoaded){
       await loadChatHistory();
       updateChatGreeting();
+      if(!chatHistory.length) renderQuickReplies();
       box.dataset.historyLoaded = '1';
     }
   } else {
     document.getElementById('chatLoggedOut').style.display = 'block';
     document.getElementById('chatBoxWrap').style.display = 'none';
   }
+}
+
+function renderQuickReplies(){
+  const box = document.getElementById('quickReplies');
+  if(!box) return;
+  const replies = [];
+  if(activeEvaluationContext && activeEvaluationContext.result){
+    const weaknesses = extractWeaknessItems(activeEvaluationContext.result).slice(0, 3);
+    weaknesses.forEach(w => {
+      const short = w.length > 36 ? w.slice(0, 36) + '…' : w;
+      replies.push({ label: '🔧 ' + short, text: `چطور می‌تونم این مورد رو برطرف کنم: ${w}` });
+    });
+  }
+  replies.push({ label: '📍 چقدر تا آماده شدن فاصله دارم؟', text: 'با توجه به نتیجه ارزیابی من، چقدر تا آماده شدن پرونده فاصله دارم و اولویت با کدوم مورده؟' });
+  replies.push({ label: '🎤 آمادگی جلسه دفاعیه', text: 'برای جلسه دفاعیه دانش‌بنیان چطور آماده بشم؟' });
+
+  box.dataset.replies = JSON.stringify(replies);
+  box.style.display = 'flex';
+  box.innerHTML = replies.map((r, i) =>
+    `<button class="quick-reply-btn" onclick="sendQuickReply(${i})">${escapeHtml(r.label)}</button>`
+  ).join('');
+}
+
+function sendQuickReply(i){
+  const box = document.getElementById('quickReplies');
+  const replies = JSON.parse(box.dataset.replies || '[]');
+  const r = replies[i];
+  if(!r) return;
+  document.getElementById('chatInput').value = r.text;
+  box.style.display = 'none';
+  sendChat();
 }
 
 async function loadChatHistory(){
@@ -1851,6 +1910,9 @@ if(!session){
 }
 
 const box = document.getElementById('chatBox');
+
+const quickRepliesBox = document.getElementById('quickReplies');
+if(quickRepliesBox) quickRepliesBox.style.display = 'none';
 
 const userBubble = document.createElement('div');
 userBubble.className = 'bubble user';
